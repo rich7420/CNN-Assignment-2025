@@ -19,6 +19,12 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install tensorflow jupyter nbconvert nbclient pytest
+    - name: Disable TensorFlow GPU
+      run: |
+        echo "Disabling TensorFlow GPU support"
+        echo "import os" >> disable_gpu.py
+        echo "os.environ['CUDA_VISIBLE_DEVICES'] = ''" >> disable_gpu.py
+        python disable_gpu.py
     - name: Check notebook file name format
       run: |
         if ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb 2>/dev/null; then
@@ -27,12 +33,6 @@ jobs:
           echo "Error: Notebook file name must follow 'ClassNumber_CNN_Assignment.ipynb' format (e.g., ACS113000_CNN_Assignment.ipynb)"
           exit 1
         fi
-    - name: Disable TensorFlow GPU
-      run: |
-        echo "Disabling TensorFlow GPU support"
-        echo "import os" >> disable_gpu.py
-        echo "os.environ['CUDA_VISIBLE_DEVICES'] = ''" >> disable_gpu.py
-        python disable_gpu.py
     - name: Execute notebook
       run: |
         for file in *.ipynb; do
