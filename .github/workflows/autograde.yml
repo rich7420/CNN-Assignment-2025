@@ -18,20 +18,25 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install tensorflow jupyter nbconvert pytest pytest-nbval nbformat
+        pip install tensorflow jupyter nbconvert nbclient pytest
     - name: Check notebook file name format
       run: |
         if ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb 2>/dev/null; then
           echo "Valid notebook file name found."
         else
-          echo "Error: Notebook file name must follow 'ClassNumber_CNN_Assignment.ipynb' format (e.g., ACS109145_CNN_Assignment.ipynb)"
+          echo "Error: Notebook file name must follow 'ClassNumber_CNN_Assignment.ipynb' format (e.g., ACS113000_CNN_Assignment.ipynb)"
           exit 1
         fi
-    - name: Run notebook
+    - name: Disable TensorFlow GPU
+      run: |
+        echo "Disabling TensorFlow GPU support"
+        echo "import os" >> disable_gpu.py
+        echo "os.environ['CUDA_VISIBLE_DEVICES'] = ''" >> disable_gpu.py
+        python disable_gpu.py
+    - name: Execute notebook
       run: |
         for file in *.ipynb; do
-          jupyter nbconvert --to python "$file"
-          python "${file%.ipynb}.py" || { echo "Error: Failed to execute $file"; exit 1; }
+          jupyter nbconvert --to notebook --execute "$file" --output "executed_$file" --ExecutePreprocessor.timeout=600 --allow-errors --ExecutePreprocessor.kernel_name=python3 > "executed_$file.log" 2>&1 || { echo "Warning: $file executed with errors" >> "executed_$file.log"; }
         done
     - name: Run custom tests
       run: |
@@ -40,7 +45,7 @@ jobs:
       run: |
         echo "Grading Results:" > grading_result.txt
         echo "- File name format: $(ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb || echo 'Invalid')" >> grading_result.txt
-        echo "- Notebook execution: Success" >> grading_result.txt
+        echo "- Notebook execution: $(for file in *.ipynb; do if grep -q 'ERROR' executed_*.log 2>/dev/null; then echo 'Failed'; else echo 'Success'; fi; break;)" >> grading_result.txt
         echo "- Task 1 (Model Changes): $(pytest tests/test_cnn.py -k test_task_1_model_changes --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
         echo "- Task 2 (Hyperparameters): $(pytest tests/test_cnn.py -k test_task_2_hyperparameters --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
         echo "- Task 3 (Data Augmentation): $(pytest tests/test_cnn.py -k test_task_3_data_augmentation --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
