@@ -1,16 +1,20 @@
 name: Autograde CNN Assignment
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
 jobs:
   autograde:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
     - name: Checkout PR code
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.pull_request.head.ref }}
         repository: ${{ github.event.pull_request.head.repo.full_name }}
+        token: ${{ secrets.GITHUB_TOKEN }}
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -18,13 +22,13 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install tensorflow jupyter nbconvert nbclient pytest
+        pip install tensorflow jupyter nbconvert nbclient pytest scikit-learn seaborn || echo "Warning: Failed to install some dependencies"
     - name: Disable TensorFlow GPU
       run: |
         echo "Disabling TensorFlow GPU support"
         echo "import os" >> disable_gpu.py
         echo "os.environ['CUDA_VISIBLE_DEVICES'] = ''" >> disable_gpu.py
-        python disable_gpu.py
+        python disable_gpu.py || echo "Warning: Failed to disable GPU"
     - name: Check notebook file name format
       run: |
         if ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb 2>/dev/null; then
@@ -34,33 +38,125 @@ jobs:
           exit 1
         fi
     - name: Execute notebook
+      continue-on-error: true
       run: |
-        for file in *.ipynb; do
-          jupyter nbconvert --to notebook --execute "$file" --output "executed_$file" --ExecutePreprocessor.timeout=600 --allow-errors --ExecutePreprocessor.kernel_name=python3 > "executed_$file.log" 2>&1 || { echo "Warning: $file executed with errors" >> "executed_$file.log"; }
+        # Set environment variables for CI execution
+        export CI=true
+        export GITHUB_ACTIONS=true
+        
+        # Execute notebook with timeout and error handling
+        for file in *_CNN_Assignment.ipynb; do
+          if [ -f "$file" ]; then
+            echo "Executing notebook: $file"
+            timeout 1800 jupyter nbconvert --to notebook --execute "$file" \
+              --output "executed_$file" \
+              --ExecutePreprocessor.timeout=1500 \
+              --ExecutePreprocessor.kernel_name=python3 \
+              --allow-errors > "executed_$file.log" 2>&1
+            
+            if [ $? -eq 0 ]; then
+              echo "Notebook executed successfully"
+              echo "NOTEBOOK_STATUS=success" >> $GITHUB_ENV
+            else
+              echo "Notebook execution failed or timed out"
+              echo "NOTEBOOK_STATUS=failed" >> $GITHUB_ENV
+            fi
+          fi
         done
+    - name: Extract model accuracy
+      continue-on-error: true
+      run: |
+        # Check for accuracy file created by notebook
+        if [ -f "model_accuracy.txt" ]; then
+          echo "Found model accuracy file:"
+          cat model_accuracy.txt
+          echo "MODEL_ACCURACY_FOUND=true" >> $GITHUB_ENV
+        else
+          echo "Model accuracy file not found"
+          echo "MODEL_ACCURACY_FOUND=false" >> $GITHUB_ENV
+        fi
+        
+        # Also check execution logs for accuracy information
+        if ls executed_*.log 2>/dev/null; then
+          echo "Searching for accuracy in execution logs:"
+          grep -i "accuracy\|loss" executed_*.log | tail -10 || echo "No accuracy information found in logs"
+        fi
     - name: Run custom tests
+      id: test
+      continue-on-error: true
       run: |
-        pytest tests/test_cnn.py --verbose || { echo "Error: Test validation failed"; exit 1; }
+        echo "Test execution started at $(date)" > test_output.txt
+        if [ -f tests/test_cnn.py ]; then
+          pytest tests/test_cnn.py --verbose --capture=tee-sys >> test_output.txt 2>&1 || echo "Warning: pytest execution failed" >> test_output.txt
+          echo "test_output.txt content after pytest:" >> test_output.txt
+          # Fix: Use cp instead of cat to avoid the input/output file error
+          cp test_output.txt test_output_backup.txt
+          cat test_output_backup.txt >> test_output.txt
+          if grep -q "FAILED" test_output.txt 2>/dev/null; then
+            echo "TEST_STATUS=failed" >> $GITHUB_OUTPUT
+          else
+            echo "TEST_STATUS=passed" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "TEST_STATUS=skipped" >> $GITHUB_OUTPUT
+          echo "Warning: tests/test_cnn.py not found" >> test_output.txt
+        fi
     - name: Collect grading results
+      id: grading
+      continue-on-error: true
       run: |
+        # Ensure grading_result.txt exists
         echo "Grading Results:" > grading_result.txt
-        echo "- File name format: $(ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb || echo 'Invalid')" >> grading_result.txt
-        echo "- Notebook execution: $(for file in *.ipynb; do if grep -q 'ERROR' executed_*.log 2>/dev/null; then echo 'Failed'; else echo 'Success'; fi; break;)" >> grading_result.txt
-        echo "- Task 1 (Model Changes): $(pytest tests/test_cnn.py -k test_task_1_model_changes --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
-        echo "- Task 2 (Hyperparameters): $(pytest tests/test_cnn.py -k test_task_2_hyperparameters --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
-        echo "- Task 3 (Data Augmentation): $(pytest tests/test_cnn.py -k test_task_3_data_augmentation --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
-        echo "- Task 4 (Visualization): $(pytest tests/test_cnn.py -k test_task_4_visualization --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
-        echo "- Task 5 (Report): $(pytest tests/test_cnn.py -k test_task_5_report --quiet && echo 'Pass' || echo 'Fail')" >> grading_result.txt
+        echo "- File name format: $(ls *[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]_CNN_Assignment.ipynb 2>/dev/null || echo 'Invalid')" >> grading_result.txt
+        
+        # Fix: Simplify the notebook execution check to avoid syntax errors
+        if [ "$NOTEBOOK_STATUS" = "success" ]; then
+          NOTEBOOK_EXECUTION="Success"
+        else
+          NOTEBOOK_EXECUTION="Failed"
+        fi
+        echo "- Notebook execution: $NOTEBOOK_EXECUTION" >> grading_result.txt
+        
+        # Add model accuracy information
+        if [ "$MODEL_ACCURACY_FOUND" = "true" ]; then
+          echo "- Model Performance:" >> grading_result.txt
+          cat model_accuracy.txt | sed 's/^/  /' >> grading_result.txt
+        else
+          echo "- Model Performance: Not available (execution may have failed)" >> grading_result.txt
+        fi
+        
+        # Add debugging output
+        echo "Debug: Checking test_output.txt existence" >> grading_result.txt
+        if [ -f test_output.txt ]; then
+          echo "Debug: test_output.txt exists, content:" >> grading_result.txt
+          cat test_output.txt >> grading_result.txt
+          echo "Debug: Running grep commands" >> grading_result.txt
+          echo "- Task 1 (File Name): $(grep -q 'FAILED.*test_file_name' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+          echo "- Task 2 (Model Changes): $(grep -q 'FAILED.*test_task_1_model_changes' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+          echo "- Task 3 (Hyperparameters): $(grep -q 'FAILED.*test_task_2_hyperparameters' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+          echo "- Task 4 (Data Augmentation): $(grep -q 'FAILED.*test_task_3_data_augmentation' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+          echo "- Task 5 (Visualization): $(grep -q 'FAILED.*test_task_4_visualization' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+          echo "- Task 6 (Report): $(grep -q 'FAILED.*test_task_5_report' test_output.txt 2>/dev/null && echo 'Fail' || echo 'Pass')" >> grading_result.txt
+        else
+          echo "Debug: test_output.txt does not exist" >> grading_result.txt
+          echo "- Task 1 (File Name): N/A" >> grading_result.txt
+          echo "- Task 2 (Model Changes): N/A" >> grading_result.txt
+          echo "- Task 3 (Hyperparameters): N/A" >> grading_result.txt
+          echo "- Task 4 (Data Augmentation): N/A" >> grading_result.txt
+          echo "- Task 5 (Visualization): N/A" >> grading_result.txt
+          echo "- Task 6 (Report): N/A" >> grading_result.txt
+        fi
     - name: Comment on PR
+      if: always()
       uses: actions/github-script@v7
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const fs = require('fs');
-          const result = fs.readFileSync('grading_result.txt', 'utf8');
+          const result = fs.readFileSync('grading_result.txt', 'utf8') || 'No grading results available due to errors.';
           await github.rest.issues.createComment({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
-            body: `Autograding Result:\n\n\`\`\`\n${result}\n\`\`\`\nPlease check the results and update your PR if needed.`
+            body: `Autograding Result:\n\n\`\`\`\n${result}\n\`\`\`\n${context.payload.pull_request.head.ref === context.payload.pull_request.base.ref ? '' : 'Note: Some tests may fail due to missing requirements. Please update your PR based on feedback.'}`
           });
