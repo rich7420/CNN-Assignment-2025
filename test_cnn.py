@@ -86,7 +86,7 @@ def test_task_5_report():
             report_found = True
             report_content = cell.source
             break
-    if not report_found:
+    if not report_found:    
         print("Warning: Task 5: Report section not found, passing with reduced score")
         return
     assert len([line for line in report_content.split('\n') if line.strip()]) > 3, "Task 5: Report section must contain meaningful content (more than 3 non-empty lines)"
