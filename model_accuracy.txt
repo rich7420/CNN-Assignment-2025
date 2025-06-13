@@ -1,0 +1,9 @@
+Model Performance Summary:
+Test Accuracy: 0.8203
+Test Loss: 0.5403
+Final Training Accuracy: 0.8128
+Final Validation Accuracy: 0.8203
+Final Training Loss: 0.5476
+Final Validation Loss: 0.5403
+Training Epochs: 15
+Model Parameters: 420842
