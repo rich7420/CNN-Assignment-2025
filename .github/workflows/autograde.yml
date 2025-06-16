@@ -1,7 +1,6 @@
 name: Autograde CNN Assignment
 on:
   workflow_dispatch:       # 手動執行
-  push:                    # 每次 push 也會執行
   pull_request_target:
     branches: [main]
 jobs:
