@@ -68,19 +68,3 @@
 
 
 ---
-
-##  模型結果
-
-- Test Accuracy：`0.7844`
-- Test Loss：`0.6401`
-- Final Training Accuracy：`0.7815`
-- Final Validation Accuracy：`0.7844`
-- Final Training Loss：`0.6310`
-- Final Validation Loss：`0.6401`
-- 模型總參數數量：`122570`
-- 訓練輪數：10 Epochs
-- 使用的資料增強：旋轉、平移、翻轉
-
----
-
-📄 *本報告結束。*
